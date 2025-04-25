@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>EDK2 Depex GUID Parser</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 800px;
+      margin: auto;
+      background-color: #f9f9f9;
+    }
+    textarea, input[type="file"], button {
+      width: 100%;
+      margin: 10px 0;
+      font-size: 16px;
+    }
+    button {
+      padding: 10px;
+    }
+    .guid {
+      font-family: monospace;
+      color: #2c3e50;
+      background: #f0f0f0;
+      padding: 8px;
+      border-radius: 4px;
+      margin: 6px 0;
+      white-space: pre;
+    }
+  </style>
+</head>
+<body>
+  <h2>EDK2 Depex GUID Parser</h2>
+
+  <label><strong>Select a .depex File:</strong></label>
+  <input type="file" id="fileInput" accept=".depex" />
+
+  <label><strong>Or Paste Hex Data (with or without spaces):</strong></label>
+  <textarea id="hexInput" rows="6" placeholder="Example: 1600001302f6f0a3134a26f03ef2e0dec512342f3408"></textarea>
+
+  <button onclick="parseDepex()">Parse GUIDs</button>
+
+  <h3>Parsed GUIDs (C Format):</h3>
+  <div id="output"></div>
+
+  <script>
+    function cleanHex(hex) {
+      return hex.trim().replace(/[^a-fA-F0-9]/g, '');
+    }
+
+    function hexToBytes(hexStr) {
+      const cleaned = cleanHex(hexStr);
+      const bytes = [];
+      for (let i = 0; i < cleaned.length; i += 2) {
+        bytes.push(parseInt(cleaned.substr(i, 2), 16));
+      }
+      return bytes;
+    }
+
+    function bytesToGuidStruct(bytes) {
+      const d1 = bytes.slice(0, 4).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
+      const d2 = bytes.slice(4, 6).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
+      const d3 = bytes.slice(6, 8).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
+      const d4 = bytes.slice(8, 16).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ');
+      return `{ 0x${d1}, 0x${d2}, 0x${d3}, { ${d4} } }`;
+    }
+
+    function parseDepexBytes(bytes) {
+      const guids = [];
+      let offset = 0;
+
+      // Skip EFI dependency section header if present
+      if (bytes.length >= 4 && bytes[3] === 0x13) {
+        offset = 4;
+      }
+
+      for (let i = offset; i < bytes.length - 16; i++) {
+        const op = bytes[i];
+        if ([0x01, 0x02, 0x03].includes(op)) { // BEFORE, AFTER, PUSH
+          const guidBytes = bytes.slice(i + 1, i + 17);
+          if (guidBytes.length === 16) {
+            guids.push(bytesToGuidStruct(guidBytes));
+            i += 16;
+          }
+        }
+      }
+      return guids;
+    }
+
+    function parseDepex() {
+      const output = document.getElementById('output');
+      output.innerHTML = '';
+
+      const hexText = document.getElementById('hexInput').value;
+      if (hexText.trim()) {
+        const bytes = hexToBytes(hexText);
+        const guids = parseDepexBytes(bytes);
+        showGuids(guids);
+        return;
+      }
+
+      const fileInput = document.getElementById('fileInput');
+      const file = fileInput.files[0];
+      if (!file) return alert('Please select a file or paste hex input.');
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const array = new Uint8Array(e.target.result);
+        const guids = parseDepexBytes(Array.from(array));
+        showGuids(guids);
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function showGuids(guidList) {
+      const output = document.getElementById('output');
+      if (guidList.length === 0) {
+        output.innerHTML = '<p>No GUIDs found.</p>';
+        return;
+      }
+      output.innerHTML = guidList.map(g => `<div class="guid">${g}</div>`).join('');
+    }
+  </script>
+</body>
+</html>

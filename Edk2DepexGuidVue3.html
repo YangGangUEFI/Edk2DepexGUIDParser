@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EDK2 Depex GUID Parser</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body class="bg-white text-zinc-900">
+  <div id="app" class="min-h-screen flex items-center justify-center transition-colors duration-300">
+    <div class="max-w-5xl w-full px-10 py-10 rounded-xl shadow-xl border border-gray-300">
+      <!-- Header -->
+      <div class="flex justify-between items-center mb-6">
+        <h1 class="text-3xl font-bold">📦 EDK2 Depex GUID Parser</h1>
+        <div class="flex items-center space-x-4">
+          <a href="https://github.com/YangGangUEFI/Edk2DepexGUIDParser" target="_blank">
+            <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" class="w-6 h-6" alt="GitHub" />
+          </a>
+        </div>
+      </div>
+
+      <!-- File Upload & Drag Drop -->
+      <label class="block text-sm font-medium mb-1">Upload or Drag .depex File</label>
+      <div
+        class="w-full flex items-center justify-center p-6 mb-6 border-2 border-dashed border-gray-400 rounded hover:border-blue-600 bg-gray-100 cursor-pointer"
+        @drop.prevent="handleDrop"
+        @dragover.prevent>
+        <label class="flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded cursor-pointer transition">
+          <span>Choose File</span>
+          <input type="file" class="hidden" @change="handleFileUpload" accept=".depex" />
+        </label>
+        <span class="ml-4 text-gray-500 text-sm" v-if="fileName">{{ fileName }}</span>
+      </div>
+
+      <!-- Hex Input -->
+      <label class="block text-sm font-medium mb-1">Or Paste Hex Data</label>
+      <textarea
+        v-model="hexInput"
+        rows="5"
+        placeholder="e.g. 1600001302f6f0a3134a26f03ef2e0dec512342f3408"
+        class="w-full rounded-md p-4 bg-gray-100 text-black placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      ></textarea>
+
+      <!-- Parse Button -->
+      <button
+        @click="parseBoth"
+        class="w-full mt-6 bg-blue-600 hover:bg-blue-700 transition text-white font-bold py-2 px-4 rounded-md"
+      >
+        Parse GUIDs
+      </button>
+
+      <!-- Output -->
+      <div v-if="parsed && (guidFromFile.length || guidFromInput.length)" class="mt-8 space-y-6">
+        <div v-if="guidFromFile.length">
+          <h2 class="text-lg font-semibold mb-2">📁 GUIDs from File</h2>
+          <div v-for="(guid, i) in guidFromFile" :key="'file-' + i"
+               class="bg-gray-200 text-blue-800 font-mono p-3 rounded mb-1">
+            {{ guid }}
+          </div>
+        </div>
+        <div v-if="guidFromInput.length">
+          <h2 class="text-lg font-semibold mb-2">📝 GUIDs from Text Input</h2>
+          <div v-for="(guid, i) in guidFromInput" :key="'input-' + i"
+               class="bg-gray-200 text-green-800 font-mono p-3 rounded mb-1">
+            {{ guid }}
+          </div>
+        </div>
+      </div>
+      <div v-else-if="parsed" class="text-gray-400 mt-4 italic">No GUIDs found.</div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref } = Vue;
+    createApp({
+      setup() {
+        const hexInput = ref('');
+        const fileName = ref('');
+        const fileBytes = ref([]);
+        const guidFromFile = ref([]);
+        const guidFromInput = ref([]);
+        const parsed = ref(false);
+
+        const handleFileUpload = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          fileName.value = file.name;
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const bytes = Array.from(new Uint8Array(event.target.result));
+            fileBytes.value = bytes;
+          };
+          reader.readAsArrayBuffer(file);
+        };
+
+        const handleDrop = (e) => {
+          const file = e.dataTransfer.files[0];
+          if (!file) return;
+          fileName.value = file.name;
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const bytes = Array.from(new Uint8Array(event.target.result));
+            fileBytes.value = bytes;
+          };
+          reader.readAsArrayBuffer(file);
+        };
+
+        const parseDepexBytes = (bytes) => {
+          const guids = [];
+          let offset = 0;
+          if (bytes.length >= 4 && bytes[3] === 0x13) offset = 4;
+          for (let i = offset; i < bytes.length - 16; i++) {
+            const op = bytes[i];
+            if ([0x01, 0x02, 0x03].includes(op)) {
+              const guidBytes = bytes.slice(i + 1, i + 17);
+              if (guidBytes.length === 16) {
+                guids.push(formatGuid(guidBytes));
+                i += 16;
+              }
+            }
+          }
+          return guids;
+        };
+
+        const formatGuid = (bytes) => {
+          const d1 = bytes.slice(0, 4).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
+          const d2 = bytes.slice(4, 6).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
+          const d3 = bytes.slice(6, 8).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
+          const d4 = bytes.slice(8, 16).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ');
+          return `{ 0x${d1}, 0x${d2}, 0x${d3}, { ${d4} } }`;
+        };
+        
+        const parseBoth = () => {
+          parsed.value = true;
+          guidFromInput.value = [];
+          guidFromFile.value = [];
+
+          const text = hexInput.value;
+
+          // Input text as hex
+          const hex = text.replace(/[^a-fA-F0-9]/g, '');
+          if (hex.length >= 32) {
+            const bytes = [];
+            for (let i = 0; i < hex.length; i += 2) {
+              bytes.push(parseInt(hex.substr(i, 2), 16));
+            }
+            guidFromInput.value = parseDepexBytes(bytes);
+          }
+
+          // File
+          if (fileBytes.value.length >= 16) {
+            guidFromFile.value = parseDepexBytes(fileBytes.value);
+          }
+        };
+
+        return {
+          hexInput,
+          fileName,
+          fileBytes,
+          guidFromFile,
+          guidFromInput,
+          parsed,
+          handleFileUpload,
+          handleDrop,
+          parseBoth,
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
