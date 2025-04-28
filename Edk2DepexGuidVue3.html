@@ -106,28 +106,73 @@
           reader.readAsArrayBuffer(file);
         };
 
+        const DEPEX_OPCODE_BEFORE = 0x00;
+        const DEPEX_OPCODE_AFTER  = 0x01;
+        const DEPEX_OPCODE_PUSH   = 0x02;
+        const DEPEX_OPCODE_AND    = 0x03;
+        const DEPEX_OPCODE_OR     = 0x04;
+        const DEPEX_OPCODE_NOT    = 0x05;
+        const DEPEX_OPCODE_TRUE   = 0x06;
+        const DEPEX_OPCODE_FALSE  = 0x07;
+        const DEPEX_OPCODE_END    = 0x08;
+        const DEPEX_OPCODE_SOR    = 0x09;
+
+        const OPCODE_STR = ["BEFORE", "AFTER", "PUSH", "AND", "OR", "NOT", "TRUE", "FALSE", "END", "SOR"];
+
+        const EFI_SECTION_DXE_DEPEX = 0x13;
+        const EFI_SECTION_PEI_DEPEX = 0x1B;
+        const EFI_SECTION_MM_DEPEX  = 0x1C;
+        const EFI_SECTION_SMM_DEPEX = EFI_SECTION_MM_DEPEX;
+
         const parseDepexBytes = (bytes) => {
           const guids = [];
           let offset = 0;
-          if (bytes.length >= 4 && bytes[3] === 0x13) offset = 4;
-          for (let i = offset; i < bytes.length - 16; i++) {
-            const op = bytes[i];
-            if ([0x01, 0x02, 0x03].includes(op)) {
+          
+          // .depex file or SECTION/SECTION2
+          let sectionsize = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16);
+          if (sectionsize === bytes.length) {
+            offset = 4;  // SECTION
+          } else if (sectionsize === 0xffffff) {
+            offset = 8;  // SECTION2
+          } else {
+            offset = 0;  // .depex
+          }
+
+          console.log(`offset ${offset}`);
+          console.log(`bytes[3] ${bytes[3]}`);
+
+          // SECTION data must have depex section type
+          if (offset) {
+            if (bytes[3] !== EFI_SECTION_DXE_DEPEX && bytes[3] !== EFI_SECTION_PEI_DEPEX && bytes[3] != EFI_SECTION_MM_DEPEX) {
+              return guids;
+            }
+          }
+          
+          for (let i = offset; i < bytes.length; i++) {
+            if (isOperationCode(bytes[i])) {
+              console.log(`${OPCODE_STR[bytes[i]]}`);
+            }
+            // Check for Push operation followed by a GUID (16 bytes)
+            if (bytes[i] === DEPEX_OPCODE_PUSH && i + 16 < bytes.length) {
               const guidBytes = bytes.slice(i + 1, i + 17);
-              if (guidBytes.length === 16) {
-                guids.push(formatGuid(guidBytes));
-                i += 16;
-              }
+              guids.push(formatGuid(guidBytes));
+              console.log(`GUID found at offset ${i+1} via DEPEX_OPCODE_PUSH`);
+              i += 16; // Skip the GUID bytes we just processed
             }
           }
           return guids;
+        };
+        
+        // Helper to check if a byte is a known operation code
+        const isOperationCode = (byte) => {
+          return [DEPEX_OPCODE_PUSH, DEPEX_OPCODE_AND, DEPEX_OPCODE_OR, DEPEX_OPCODE_NOT, DEPEX_OPCODE_TRUE, DEPEX_OPCODE_FALSE, DEPEX_OPCODE_END].includes(byte);
         };
 
         const formatGuid = (bytes) => {
           const d1 = bytes.slice(0, 4).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
           const d2 = bytes.slice(4, 6).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
           const d3 = bytes.slice(6, 8).reverse().map(b => b.toString(16).padStart(2, '0')).join('');
-          const d4 = bytes.slice(8, 16).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', ');
+          const d4 = bytes.slice(8, 16).map(b => b.toString(16).padStart(2, '0')).join('').match(/.{1,2}/g).map(h => '0x' + h).join(', ');
           return `{ 0x${d1}, 0x${d2}, 0x${d3}, { ${d4} } }`;
         };
         
