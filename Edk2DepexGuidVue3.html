@@ -36,19 +36,27 @@
       </div>
 
       <!-- GUID Database Status -->
-      <div class="mb-6 p-3 bg-gray-100 rounded">
-        <div v-if="guidDatabaseStatus === 'loading'" class="text-blue-600">
-          <span class="inline-block animate-spin mr-2">⟳</span> 加载GUID数据库中...
+      <div class="mb-6 p-3 bg-gray-100 rounded flex justify-between items-center">
+        <div>
+          <div v-if="guidDatabaseStatus === 'loading'" class="text-blue-600">
+            <span class="inline-block animate-spin mr-2">⟳</span> 加载GUID数据库中...
+          </div>
+          <div v-else-if="guidDatabaseStatus === 'loaded'" class="text-green-600">
+            ✓ GUID数据库已加载 ({{Object.keys(guidDatabase).length}} 个GUID)
+          </div>
+          <div v-else-if="guidDatabaseStatus === 'failed'" class="text-red-600">
+            ✗ GUID数据库加载失败 - {{guidDatabaseError}}
+          </div>
+          <div v-else class="text-gray-600">
+            GUID数据库未加载
+          </div>
         </div>
-        <div v-else-if="guidDatabaseStatus === 'loaded'" class="text-green-600">
-          ✓ GUID数据库已加载 ({{Object.keys(guidDatabase).length}} 个GUID)
-        </div>
-        <div v-else-if="guidDatabaseStatus === 'failed'" class="text-red-600">
-          ✗ GUID数据库加载失败 - {{guidDatabaseError}}
-        </div>
-        <div v-else class="text-gray-600">
-          GUID数据库未加载
-        </div>
+        
+        <!-- 导入本地GUID数据库按钮 -->
+        <label class="flex items-center justify-center px-3 py-1 bg-green-600 hover:bg-green-700 text-white font-semibold rounded cursor-pointer transition">
+          <span>导入本地GUID数据库</span>
+          <input type="file" class="hidden" @change="importGuidDatabase" accept=".json" />
+        </label>
       </div>
 
       <!-- Hex Input -->
@@ -143,6 +151,36 @@
             guidDatabaseError.value = err.message;
             console.error('Failed to load GUID database:', err);
           }
+        };
+        
+        // 导入本地GUID数据库
+        const importGuidDatabase = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          
+          guidDatabaseStatus.value = 'loading';
+          
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const data = JSON.parse(event.target.result);
+              guidDatabase.value = data;
+              guidDatabaseStatus.value = 'loaded';
+              console.log(`Imported ${Object.keys(data).length} GUIDs from local database`);
+            } catch (err) {
+              guidDatabaseStatus.value = 'failed';
+              guidDatabaseError.value = 'JSON 解析错误: ' + err.message;
+              console.error('Failed to parse imported GUID database:', err);
+            }
+          };
+          
+          reader.onerror = () => {
+            guidDatabaseStatus.value = 'failed';
+            guidDatabaseError.value = '读取文件错误';
+            console.error('Error reading the file');
+          };
+          
+          reader.readAsText(file);
         };
         
         // 在组件挂载时加载GUID数据库
@@ -314,7 +352,8 @@
           handleFileUpload,
           handleDrop,
           parseBoth,
-          loadGuidDatabase
+          loadGuidDatabase,
+          importGuidDatabase
         };
       }
     }).mount('#app');
