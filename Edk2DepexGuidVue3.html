@@ -9,7 +9,7 @@
 </head>
 <body class="bg-white text-zinc-900">
   <div id="app" class="min-h-screen flex items-center justify-center transition-colors duration-300">
-    <div class="max-w-5xl w-full px-10 py-10 rounded-xl shadow-xl border border-gray-300">
+    <div class="max-w-6xl w-full px-10 py-10 rounded-xl shadow-xl border border-gray-300">
       <!-- Header -->
       <div class="flex justify-between items-center mb-6">
         <h1 class="text-3xl font-bold">📦 EDK2 Depex GUID Parser</h1>
@@ -21,16 +21,34 @@
       </div>
 
       <!-- File Upload & Drag Drop -->
-      <label class="block text-sm font-medium mb-1">Upload or Drag .depex File</label>
-      <div
-        class="w-full flex items-center justify-center p-6 mb-6 border-2 border-dashed border-gray-400 rounded hover:border-blue-600 bg-gray-100 cursor-pointer"
-        @drop.prevent="handleDrop"
-        @dragover.prevent>
-        <label class="flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded cursor-pointer transition">
-          <span>Choose File</span>
-          <input type="file" class="hidden" @change="handleFileUpload" accept=".depex" />
-        </label>
-        <span class="ml-4 text-gray-500 text-sm" v-if="fileName">{{ fileName }}</span>
+      <div class="mb-6">
+        <label class="block text-sm font-medium mb-1">Upload or Drag .depex File</label>
+        <div
+          class="w-full flex items-center justify-center p-6 border-2 border-dashed border-gray-400 rounded hover:border-blue-600 bg-gray-100 cursor-pointer"
+          @drop.prevent="handleDrop"
+          @dragover.prevent>
+          <label class="flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded cursor-pointer transition">
+            <span>Choose File</span>
+            <input type="file" class="hidden" @change="handleFileUpload" accept=".depex" />
+          </label>
+          <span class="ml-4 text-gray-500 text-sm" v-if="fileName">{{ fileName }}</span>
+        </div>
+      </div>
+
+      <!-- GUID Database Status -->
+      <div class="mb-6 p-3 bg-gray-100 rounded">
+        <div v-if="guidDatabaseStatus === 'loading'" class="text-blue-600">
+          <span class="inline-block animate-spin mr-2">⟳</span> 加载GUID数据库中...
+        </div>
+        <div v-else-if="guidDatabaseStatus === 'loaded'" class="text-green-600">
+          ✓ GUID数据库已加载 ({{Object.keys(guidDatabase).length}} 个GUID)
+        </div>
+        <div v-else-if="guidDatabaseStatus === 'failed'" class="text-red-600">
+          ✗ GUID数据库加载失败 - {{guidDatabaseError}}
+        </div>
+        <div v-else class="text-gray-600">
+          GUID数据库未加载
+        </div>
       </div>
 
       <!-- Hex Input -->
@@ -54,16 +72,32 @@
       <div v-if="parsed && (guidFromFile.length || guidFromInput.length)" class="mt-8 space-y-6">
         <div v-if="guidFromFile.length">
           <h2 class="text-lg font-semibold mb-2">📁 GUIDs from File</h2>
-          <div v-for="(guid, i) in guidFromFile" :key="'file-' + i"
-               class="bg-gray-200 text-blue-800 font-mono p-3 rounded mb-1">
-            {{ guid }}
+          <div v-for="(item, i) in guidFromFile" :key="'file-' + i"
+               class="bg-gray-200 p-3 rounded mb-1">
+            <div class="flex flex-col md:flex-row md:items-center space-y-2 md:space-y-0">
+              <code class="text-blue-800 font-mono">{{ item.guid }}</code>
+              <span v-if="item.name" class="md:ml-4 px-3 py-1 bg-blue-100 text-blue-800 rounded">
+                {{ item.name }}
+              </span>
+              <span v-else class="md:ml-4 px-3 py-1 bg-gray-100 text-gray-500 rounded italic">
+                (未知GUID)
+              </span>
+            </div>
           </div>
         </div>
         <div v-if="guidFromInput.length">
           <h2 class="text-lg font-semibold mb-2">📝 GUIDs from Text Input</h2>
-          <div v-for="(guid, i) in guidFromInput" :key="'input-' + i"
-               class="bg-gray-200 text-green-800 font-mono p-3 rounded mb-1">
-            {{ guid }}
+          <div v-for="(item, i) in guidFromInput" :key="'input-' + i"
+               class="bg-gray-200 p-3 rounded mb-1">
+            <div class="flex flex-col md:flex-row md:items-center space-y-2 md:space-y-0">
+              <code class="text-green-800 font-mono">{{ item.guid }}</code>
+              <span v-if="item.name" class="md:ml-4 px-3 py-1 bg-green-100 text-green-800 rounded">
+                {{ item.name }}
+              </span>
+              <span v-else class="md:ml-4 px-3 py-1 bg-gray-100 text-gray-500 rounded italic">
+                (未知GUID)
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -72,7 +106,8 @@
   </div>
 
   <script>
-    const { createApp, ref } = Vue;
+    const { createApp, ref, onMounted } = Vue;
+    
     createApp({
       setup() {
         const hexInput = ref('');
@@ -81,6 +116,39 @@
         const guidFromFile = ref([]);
         const guidFromInput = ref([]);
         const parsed = ref(false);
+        
+        // GUID数据库状态
+        const guidDatabase = ref({});
+        const guidDatabaseStatus = ref('idle'); // idle, loading, loaded, failed
+        const guidDatabaseError = ref('');
+        
+        // 加载GUID数据库
+        const loadGuidDatabase = async () => {
+          guidDatabaseStatus.value = 'loading';
+          
+          try {
+            // 尝试从当前目录加载Edk2Guid.json文件
+            const response = await fetch('Edk2Guid.json');
+            
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            guidDatabase.value = data;
+            guidDatabaseStatus.value = 'loaded';
+            console.log(`Loaded ${Object.keys(data).length} GUIDs from database`);
+          } catch (err) {
+            guidDatabaseStatus.value = 'failed';
+            guidDatabaseError.value = err.message;
+            console.error('Failed to load GUID database:', err);
+          }
+        };
+        
+        // 在组件挂载时加载GUID数据库
+        onMounted(() => {
+          loadGuidDatabase();
+        });
 
         const handleFileUpload = (e) => {
           const file = e.target.files[0];
@@ -155,14 +223,48 @@
             // Check for Push operation followed by a GUID (16 bytes)
             if (bytes[i] === DEPEX_OPCODE_PUSH && i + 16 < bytes.length) {
               const guidBytes = bytes.slice(i + 1, i + 17);
-              guids.push(formatGuid(guidBytes));
-              console.log(`GUID found at offset ${i+1} via DEPEX_OPCODE_PUSH`);
+              const formattedGuid = formatGuid(guidBytes);
+              
+              // 查找GUID对应的名称
+              const guidName = lookupGuidName(formattedGuid);
+              
+              guids.push({
+                guid: formattedGuid,
+                name: guidName
+              });
+              
+              console.log(`GUID found at offset ${i+1} via DEPEX_OPCODE_PUSH: ${formattedGuid} ${guidName ? '(' + guidName + ')' : ''}`);
               i += 16; // Skip the GUID bytes we just processed
             }
           }
           return guids;
         };
         
+        // 根据GUID值查找名称
+        const lookupGuidName = (guidValue) => {
+          if (guidDatabaseStatus.value !== 'loaded') return null;
+          
+          // 移除所有空格，便于比较
+          const normalizedGuidValue = normalizeHex(guidValue);
+          
+          for (const [name, value] of Object.entries(guidDatabase.value)) {
+            const normalizedStoredValue = normalizeHex(value);
+            if (normalizedStoredValue === normalizedGuidValue) {
+              return name;
+            }
+          }
+          
+          return null;
+        };
+        
+        const normalizeHex = (hexStr) => {
+          // 去除所有空白字符
+          let normalized = hexStr.replace(/\s+/g, '').toLowerCase();
+          
+          // 匹配所有的十六进制数字模式(0x后跟一个或多个十六进制数字)
+          return normalized.replace(/0x0*([1-9a-f][0-9a-f]*|0)/g, '0x$1');
+        };
+
         // Helper to check if a byte is a known operation code
         const isOperationCode = (byte) => {
           return [DEPEX_OPCODE_PUSH, DEPEX_OPCODE_AND, DEPEX_OPCODE_OR, DEPEX_OPCODE_NOT, DEPEX_OPCODE_TRUE, DEPEX_OPCODE_FALSE, DEPEX_OPCODE_END].includes(byte);
@@ -206,9 +308,13 @@
           guidFromFile,
           guidFromInput,
           parsed,
+          guidDatabase,
+          guidDatabaseStatus,
+          guidDatabaseError,
           handleFileUpload,
           handleDrop,
           parseBoth,
+          loadGuidDatabase
         };
       }
     }).mount('#app');
